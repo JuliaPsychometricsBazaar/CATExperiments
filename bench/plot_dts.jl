@@ -10,7 +10,7 @@ using PrettyTables
 function draw_time_density(df)
     f = Figure()
     Axis(f[1, 1], xscale = Makie.pseudolog10)
-    for grp in groupby(df, :system)
+    for grp in groupby(df, :system_name)
         vals = collect(skipmissing(grp[!, :time]))
         @show vals
         density!(vals, strokewidth = 1, strokecolor = :black, fillcolor = :blue, alpha = 0.5)
@@ -20,8 +20,8 @@ end
 
 function draw_time_boxplot(df)
     set_default_plot_size(14cm, 20cm)
-    plot_all = Gadfly.plot(df, x=:system, y=:time, Geom.boxplot)
-    filter_cond = df[!, :system] .∉ Ref(Set((
+    plot_all = Gadfly.plot(df, x=:system_name, y=:time, Geom.boxplot)
+    filter_cond = df[!, :system_name] .∉ Ref(Set((
         "fixedw_20_tm3",
         "fixedw_11_tm3",
         "fixedw_20_tm5",
@@ -30,7 +30,7 @@ function draw_time_boxplot(df)
     )))
     df_filtered = df[filter_cond, :]
     @show df df_filtered
-    plot_filter = Gadfly.plot(df_filtered, x=:system, y=:time, Geom.boxplot)
+    plot_filter = Gadfly.plot(df_filtered, x=:system_name, y=:time, Geom.boxplot)
     vstack(plot_all, plot_filter)
 end
 
@@ -39,8 +39,8 @@ const kvals = (1, 3, 10, 30, 100)
 function report_top_ks(df)
     systems = []
     cols = [[] for kval_ in kvals]
-    for grp in groupby(df, :system)
-        push!(systems, grp[1, :system])
+    for grp in groupby(df, :system_name)
+        push!(systems, grp[1, :system_name])
         for (idx, kval) in enumerate(kvals)
             push!(cols[idx], sum(grp[!, :k] .<= kval) / nrow(grp) * 100)
         end
@@ -57,8 +57,8 @@ end
 function main(inf)
     conn = DBInterface.connect(DuckDB.DB, inf)
     df = DataFrame(DBInterface.execute(conn, "SELECT * FROM next_item"))
-    #draw_time_density(df)
-    #draw_time_boxplot(df)
+    draw_time_density(df)
+    draw_time_boxplot(df)
     report_top_ks(df)
 end
 
