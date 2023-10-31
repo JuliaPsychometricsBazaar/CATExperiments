@@ -1,5 +1,3 @@
-include("../src/hacks.jl")
-
 using Base
 using ComputerAdaptiveTesting.Aggregators
 using PsychometricsBazaarBase.Integrators
