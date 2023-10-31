@@ -2,3 +2,7 @@
 /LocalPreferences.toml
 /Manifest.toml
 /attic/
+/bench/*.jsonl
+/bench/*.parquet
+/bench/*.duckdb
+/bench/*.csv
