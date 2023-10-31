@@ -6,3 +6,4 @@
 /bench/*.parquet
 /bench/*.duckdb
 /bench/*.csv
+*.wal
