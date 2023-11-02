@@ -1,3 +1,0 @@
-#!/bin/bash
-
-exec $(julia --project=.. ./duckdb_path.jl) "$@"

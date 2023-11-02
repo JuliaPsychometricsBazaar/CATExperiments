@@ -1,0 +1,25 @@
+rule all:
+    input:
+        "work/plots/inc_item_bank.png"
+
+rule bench_inc_item_bank:
+    output:
+        "work/jsonls/inc_item_bank.jsonl"
+    shell:
+        "julia --project=. record/inc_item_bank.jl {output}"
+
+rule proc_inc_item_bank:
+    input:
+        "work/jsonls/inc_item_bank.jsonl"
+    output:
+        "work/parquet/inc_item_bank.parquet"
+    shell:
+        "./proc/inc_item_bank.sh {input} {output}"
+
+rule plot_inc_item_bank:
+    input:
+        "work/parquet/inc_item_bank.parquet"
+    output:
+        "work/plots/inc_item_bank.png"
+    shell:
+        "julia --project=. plot/inc_item_bank.jl {input} {output}"
