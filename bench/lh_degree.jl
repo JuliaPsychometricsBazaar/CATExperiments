@@ -14,7 +14,6 @@ using Random: Xoshiro
 using SuperFastCat
 using SuperFastCat.Slow
 using Base.Iterators: take
-using GLMakie
 
 include("./utils.jl")
 
