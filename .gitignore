@@ -7,3 +7,5 @@
 /bench/*.duckdb
 /bench/*.csv
 *.wal
+/work/
+/.snakemake/
