@@ -1,25 +1,32 @@
 rule all:
     input:
-        "work/plots/inc_item_bank.png"
+        "work/plots/inc_item_bank_1dim_4pl.png",
+        "work/plots/inc_item_bank_2dim.png"
 
-rule bench_inc_item_bank:
+rule record_inc_item_bank_1dim_4pl:
     output:
-        "work/jsonls/inc_item_bank.jsonl"
+        "work/jsonls/inc_item_bank_1dim_4pl.jsonl"
     shell:
-        "julia --project=. record/inc_item_bank.jl {output}"
+        "julia --project=. record/inc_item_bank_1dim_4pl.jl {output}"
+
+rule record_inc_item_bank_2dim:
+    output:
+        "work/jsonls/inc_item_bank_2dim.jsonl"
+    shell:
+        "julia --project=. record/inc_item_bank_2dim.jl {output}"
 
 rule proc_inc_item_bank:
     input:
-        "work/jsonls/inc_item_bank.jsonl"
+        "work/jsonls/inc_item_bank_{var}.jsonl"
     output:
-        "work/parquet/inc_item_bank.parquet"
+        "work/parquet/inc_item_bank_{var}.parquet"
     shell:
         "./proc/inc_item_bank.sh {input} {output}"
 
 rule plot_inc_item_bank:
     input:
-        "work/parquet/inc_item_bank.parquet"
+        "work/parquet/inc_item_bank_{var}.parquet"
     output:
-        "work/plots/inc_item_bank.png"
+        "work/plots/inc_item_bank_{var}.png"
     shell:
         "julia --project=. plot/inc_item_bank.jl {input} {output}"

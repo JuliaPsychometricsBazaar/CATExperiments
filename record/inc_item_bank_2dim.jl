@@ -23,8 +23,9 @@ using Distributions
 using FittedItemBanks.DummyData: dummy_full, std_normal, SimpleItemBankSpec, StdModel4PL, VectorContinuousDomain, OneDimContinuousDomain, BooleanResponse
 using CondaPkg
 import SuperFastCat
-using Profile
 using RCall
+using QuasiMonteCarlo
+
 
 include("../bench/utils.jl")
 include("../utils/RandomItemBanks.jl")
@@ -38,12 +39,12 @@ MirtCat = Base.get_extension(RIrtWrappers, :MirtCat)
 const all_num_items = round.(Int, 10 .^ (1.5:0.25:8))
 
 function item_bank_to_params(item_bank, num_items)
-    return [
+    return (
         item_bank.inner_bank.inner_bank.difficulties[1:num_items],
-        item_bank.inner_bank.inner_bank.discriminations[1:num_items],
+        item_bank.inner_bank.inner_bank.discriminations[:, 1:num_items],
         item_bank.inner_bank.guesses[1:num_items],
         item_bank.slips[1:num_items],
-    ]
+    )
 end
 
 struct CatJLSystem{A, B, C}
@@ -54,7 +55,8 @@ end
 
 function CatJLSystem(params, responses)
     lh_grid_tracker, next_item_rule = mk_catconfig()
-    item_bank = ItemBank4PL(params...)
+    @info "CatJLSystem" next_item_rule 
+    item_bank = ItemBankMirt4PL(params...)
     tracked_responses = TrackedResponses(
         BareResponses(ResponseType(item_bank), collect(1:10), collect(responses[1:10])),
         item_bank,
@@ -68,74 +70,77 @@ end
     system.next_item_rule(system.tracked_responses, system.item_bank)
 end
 
-struct MirtCatSystem{A}
+struct MirtCatSystem{A, R}
     mirt_design::A
+    responses::R
 end
 
-function MirtCatSystem(params, responses)
-    params_mat = hcat(params...)
-    mirt_design = MirtCat.make_mirtcat(params_mat, "MEPV", "MEPV")[1]
+function MirtCatSystem(params::Tuple, responses)
+    params_mat = hcat(params[1], transpose(params[2]), params[3], params[4])
+    # DRule as implemented by CatJL is actually postposterior DRule
+    mirt_design = MirtCat.make_mirtcat(params_mat)[1]
     for i in 1:10
         mirt_design = MirtCat.next(mirt_design, i, responses[i])
     end
-    MirtCatSystem(mirt_design)
+    MirtCatSystem(mirt_design, responses)
 end
 
 @inline function (system::MirtCatSystem)()
-    MirtCat.next_item(system.mirt_design)
-end
-
-struct SuperFastCatSystem{A}
-    state::A
-end
-
-function SuperFastCatSystem(params, responses)
-    params_mat = hcat(params...)
-    state = SuperFastCat.FixedRectSimState(
-        params_mat,
-        i -> responses[i],
-        11;
-        quadpts=61,
-        theta_lo=-6.0f0,
-        theta_hi=6.0f0
-    )
-    SuperFastCat.precompute!(state)
-    for i in 1:10
-        SuperFastCat.advance_next_item!(state, i, responses[i])
-    end
-    SuperFastCatSystem(state)
-end
-
-@inline function (system::SuperFastCatSystem)()
-    SuperFastCat.get_next_item!(system.state)
+    idx = MirtCat.next_item(system.mirt_design, "DPrule")
+    idx_jl = RCall.rcopy(idx)
+    # Fair comparison since we measure the tracking cost for CatJL
+    MirtCat.next(system.mirt_design, idx, system.responses[idx_jl])
+    idx
 end
 
 function mk_catconfig()
-    integrator = even_grid(-6.0, 6.0, 61)
+    integrator = even_grid([-6.0, -6.0], [6.0, 6.0], 31)
     lh_ability_est = LikelihoodAbilityEstimator()
-    lh_grid_tracker = GriddedAbilityTracker(lh_ability_est, integrator)
-    ability_integrator = AbilityIntegrator(integrator, lh_grid_tracker)
+    #lh_grid_tracker = GriddedAbilityTracker(lh_ability_est, integrator)
+    ability_integrator = AbilityIntegrator(integrator)
     ability_estimator = MeanAbilityEstimator(lh_ability_est, ability_integrator)
-    next_item_rule = preallocate(catr_next_item_aliases["MEPV"](ability_estimator))
-    return (lh_grid_tracker, next_item_rule)
+    next_item_rule = preallocate(NextItemRule(DRuleItemCriterion(ability_estimator)))
+    # XXX: This is bad that preallocate breaks maybe_tracked_ability_estimate
+    lh_point_tracker = PointAbilityTracker(next_item_rule.criterion.ability_estimator, [NaN, NaN])
+    @info "mk_catconfig" lh_point_tracker
+    return (lh_point_tracker, next_item_rule)
 end
 
 function run(rw, systems, num_items, params, responses; write=true)
     next_systems = []
     for (system_name, mk_system) in systems
         @info "running" system_name num_items
-        system = mk_system(params, responses)
+        t = @timed mk_system(params, responses)
+        system = t[:value]
+        init_time = t[:time]
+        if write
+            write_rec(
+                rw;
+                system_name=system_name,
+                quantity="init_time",
+                num_items=num_items,
+                time=init_time
+            )
+        end
         t = @timed system()
-        time = t[:time]
+        run_time = t[:time]
         value = RCall.rcopy(t[:value])
         @info "value" value typeof(value)
+        total_time = init_time + run_time
         if write
             write_rec(
                 rw;
                 system_name=system_name,
                 quantity="runtime",
                 num_items=num_items,
-                time=time
+                time=total_time
+            )
+            write_rec(
+                rw;
+                system_name=system_name,
+                quantity="next_item_rule_runtime",
+                num_items=num_items,
+                time=run_time
             )
             write_rec(
                 rw;
@@ -145,7 +150,7 @@ function run(rw, systems, num_items, params, responses; write=true)
                 item_idx=value
             )
         end
-        if time < 1.0
+        if total_time < 1.0
             push!(next_systems, (system_name, mk_system))
         end
     end
@@ -156,15 +161,16 @@ function main()
     rng = Xoshiro(42)
     (full_item_bank, abilities, responses) = dummy_full(
         rng,
-        SimpleItemBankSpec(StdModel4PL(), OneDimContinuousDomain(), BooleanResponse());
+        SimpleItemBankSpec(StdModel4PL(), VectorContinuousDomain(), BooleanResponse()),
+        2;
         num_questions=10^8,
         num_testees=1
     )
+    @info "main" full_item_bank
 
     systems = [
         ("catjl", CatJLSystem),
         ("mirtcat", MirtCatSystem),
-        ("superfastcat", SuperFastCatSystem),
     ]
 
     open_rec_writer(ARGS[1]) do rw
